@@ -302,3 +302,8 @@ async def set_default_timezone(
 
 
 bot.run(os.getenv("TOKEN"))
+
+print("Closing databases")
+users_db.close()
+guilds_db.close()
+print("Databases successfully closed")
