@@ -16,5 +16,11 @@ In this mode, the user just have to enter a natural language time, such as `12th
 ### Response
 The bot's response will be ephemeral, which mean that only the person who used the slash command can see it. In the response will be both the timestamp embed that you can copy to your own message, and the preview of what that'll look like when rendered.
 
+### Configurations
+#### Default timezone
+> Command: `/config set_default_timezone`
+
+Use this command to set the default timezone to be used. This setting is user specific.
+
 ## Installation / Hosting
 The installation and hosting process is like any other python code, install the required dependency (for now just look at the code as requirements.txt doesn't exist yet) and just run it with `python3 main.py`. The only extra thing you have to do is create a `.env` file in the same folder as the `main.py` and put your bot's token in there, for example `TOKEN = QWERTY1234`
