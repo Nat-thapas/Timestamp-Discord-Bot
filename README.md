@@ -1,7 +1,7 @@
 # Timestamp Discord Bot
 ---
 ## What is this for?
-Have you ever wanted to create a Discord timestamp such as `<t:1691829000:f>` which will be rendered as `12 August 2023 15:30` on Discord? This bot help you easily achive that
+Have you ever wanted to create a Discord timestamp such as `<t:1691829000:f>` which will be rendered as `12 August 2023 15:30` on Discord? This bot help you easily achive that.
 ## Usage
 ### Manual mode
 > Command: `/timestamp manual`
