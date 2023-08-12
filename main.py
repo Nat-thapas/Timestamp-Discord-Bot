@@ -1,5 +1,6 @@
 import calendar
 import datetime
+import json
 import os
 import re
 from textwrap import dedent
@@ -8,8 +9,28 @@ import ctparse
 import discord
 import dotenv
 from dateutil.relativedelta import relativedelta
+from sqlitedict import SqliteDict
 
 dotenv.load_dotenv()
+
+users_db = SqliteDict(
+    "database.sqlite",
+    tablename="users",
+    journal_mode="WAL",
+    encode=json.dumps,
+    decode=json.loads,
+    autocommit=True,
+    outer_stack=False,
+)
+guilds_db = SqliteDict(
+    "database.sqlite",
+    tablename="guilds",
+    journal_mode="WAL",
+    encode=json.dumps,
+    decode=json.loads,
+    autocommit=True,
+    outer_stack=False,
+)
 
 bot = discord.Bot()
 
@@ -20,7 +41,8 @@ async def on_ready():
 
 
 timestamp = bot.create_group(
-    "timestamp", "Convert time to timestamp"#, guild_ids=[772410370810839070]  # Uncomment to get instant propagation of slash commands
+    "timestamp",
+    "Convert time to timestamp", guild_ids=[772410370810839070]  # Uncomment to get instant propagation of slash commands
 )
 
 
@@ -44,7 +66,7 @@ async def manual(
     timezone: discord.Option(
         str,
         "±hh:mm or ±hh, leading zero in the hours part can be omitted",
-        default="+00:00",
+        default="DEFAULT",
     ),
 ):
     if 0 <= year < 100:
@@ -69,6 +91,11 @@ async def manual(
                 year = past_full_year
             else:
                 year = future_full_year
+    if timezone == "DEFAULT":
+        if ctx.author.id in users_db and "default_timezone" in users_db[ctx.author.id]:
+            timezone = users_db[ctx.author.id]["default_timezone"]
+        else:
+            timezone = "+00:00"
     tz_match = re.search("([+-])(\d?\d)(?::([0-5]\d))?", timezone)
     if not tz_match:
         await ctx.respond(
@@ -132,9 +159,14 @@ async def automatic(
     timezone: discord.Option(
         str,
         "±hh:mm or ±hh, leading zero in the hours part can be omitted",
-        default="+00:00",
+        default="DEFAULT",
     ),
 ):
+    if timezone == "DEFAULT":
+        if ctx.author.id in users_db and "default_timezone" in users_db[ctx.author.id]:
+            timezone = users_db[ctx.author.id]["default_timezone"]
+        else:
+            timezone = "+00:00"
     tz_match = re.search("([+-])(\d?\d)(?::([0-5]\d))?", timezone)
     if not tz_match:
         await ctx.respond(
@@ -228,6 +260,45 @@ async def automatic(
             "Unknown exception occured, please try again later.",
             ephemeral=True,
         )
+
+
+config = bot.create_group(
+    "config",
+    "Configure the bot", guild_ids=[772410370810839070]  # Uncomment to get instant propagation of slash commands
+)
+
+
+@config.command(
+    descripton="Setting the default timezone to be used when no timezone argument is provided"
+)
+async def set_default_timezone(
+    ctx,
+    new_timezone: discord.Option(
+        str, "±hh:mm or ±hh, leading zero in the hours part can be omitted"
+    ),
+):
+    tz_match = re.search("([+-])(\d?\d)(?::([0-5]\d))?", new_timezone)
+    if not tz_match:
+        await ctx.respond(
+            "Invalid timezone format, please make sure the input is correct and try again.",
+            ephemeral=True,
+        )
+        return
+    tz_sign = tz_match[1]
+    tz_hour = int(tz_match[2])
+    tz_minute = int(tz_match[3]) if tz_match[3] else 0
+    tz_string = f"{tz_sign}{tz_hour:02d}:{tz_minute:02d}"
+    if ctx.author.id in users_db:
+        user_data = users_db[ctx.author.id]
+    else:
+        user_data = {}
+    user_data["default_timezone"] = tz_string
+    users_db[ctx.author.id] = user_data
+    await ctx.respond(
+        "Successfully configured default timezone for you.",
+        ephemeral=True,
+    )
+    return
 
 
 bot.run(os.getenv("TOKEN"))
