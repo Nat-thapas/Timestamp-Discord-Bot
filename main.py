@@ -14,7 +14,7 @@ from sqlitedict import SqliteDict
 
 import parsers
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s:%(levelname)s:%(name)s: %(message)s')
 
 dotenv.load_dotenv()
 
@@ -129,7 +129,7 @@ async def manual(
         )
     except Exception:
         logging.exception(
-            f'An exception occured with input "{day}-{month}-{year} {hour}:{minute}:{second} {timezone}" (manual mode)'
+            f'An exception occured with input "{year}-{month}-{day} {hour}:{minute}:{second} {timezone}" (manual mode)'
         )
         await ctx.respond(
             "Unknown exception occured, please try again later.",
