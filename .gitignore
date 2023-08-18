@@ -1,3 +1,4 @@
 .env
 note.md
 database*
+__pycache__

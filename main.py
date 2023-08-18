@@ -1,6 +1,7 @@
 import calendar
 import datetime
 import json
+import logging
 import os
 import re
 from textwrap import dedent
@@ -11,20 +12,27 @@ import dotenv
 from dateutil.relativedelta import relativedelta
 from sqlitedict import SqliteDict
 
+import parsers
+
+logging.basicConfig(level=logging.INFO)
+
 dotenv.load_dotenv()
+
+is_development = os.getenv("DEV", "FALSE").lower() == "true"
+if is_development:
+    logging.info("Environment is detected as development")
+    preview_guilds = list(map(int, os.getenv("PREVIEW_GUILDS", "").split(",")))
+    if preview_guilds:
+        logging.info(f"Commands will only be available on {preview_guilds}")
+    else:
+        preview_guilds = None
+        logging.info("Commands will be available globally")
+else:
+    preview_guilds = None
 
 users_db = SqliteDict(
     "database.sqlite",
     tablename="users",
-    journal_mode="WAL",
-    encode=json.dumps,
-    decode=json.loads,
-    autocommit=True,
-    outer_stack=False,
-)
-guilds_db = SqliteDict(
-    "database.sqlite",
-    tablename="guilds",
     journal_mode="WAL",
     encode=json.dumps,
     decode=json.loads,
@@ -37,12 +45,11 @@ bot = discord.Bot()
 
 @bot.event
 async def on_ready():
-    print(f"{bot.user} is now ready.")
+    logging.info(f"{bot.user} is now ready.")
 
 
 timestamp = bot.create_group(
-    "timestamp",
-    "Convert time to timestamp", guild_ids=[772410370810839070]  # Uncomment to get instant propagation of slash commands
+    "timestamp", "Convert time to timestamp", guild_ids=preview_guilds
 )
 
 
@@ -69,44 +76,25 @@ async def manual(
         default="DEFAULT",
     ),
 ):
-    if 0 <= year < 100:
-        current_year = datetime.datetime.utcnow().year
-        current_modifier = round(current_year, -2)
-        past_modifier = current_modifier - 100
-        future_modifier = current_modifier + 100
-        current_full_year = current_modifier + year
-        past_full_year = past_modifier + year
-        future_full_year = future_modifier + year
-        if abs(current_year - current_full_year) <= abs(current_year - past_full_year):
-            if abs(current_year - current_full_year) < abs(
-                current_year - future_full_year
-            ):
-                year = current_full_year
-            else:
-                year = future_full_year
-        else:
-            if abs(current_year - past_full_year) < abs(
-                current_year - future_full_year
-            ):
-                year = past_full_year
-            else:
-                year = future_full_year
     if timezone == "DEFAULT":
         if ctx.author.id in users_db and "default_timezone" in users_db[ctx.author.id]:
             timezone = users_db[ctx.author.id]["default_timezone"]
         else:
             timezone = "+00:00"
-    tz_match = re.search("([+-])(\d?\d)(?::([0-5]\d))?", timezone)
-    if not tz_match:
+    try:
+        tz_offset_seconds = parsers.parse_timezone(timezone)
+    except ValueError:
         await ctx.respond(
             "Invalid timezone format, please make sure the input is correct and try again.",
             ephemeral=True,
         )
         return
-    tz_sign = 1 if tz_match[1] == "+" else -1
-    tz_hour = int(tz_match[2])
-    tz_minute = int(tz_match[3]) if tz_match[3] else 0
-    tz_offset_seconds = tz_sign * 60 * (tz_hour * 60 + tz_minute)
+    reference_time = datetime.datetime.utcnow() + relativedelta(
+        seconds=tz_offset_seconds
+    )
+    if 0 <= year < 100:
+        current_year = reference_time.year
+        year = parsers.short_to_long_year(year, current_year)
     try:
         unix_time = round(
             calendar.timegm(
@@ -140,6 +128,9 @@ async def manual(
             ephemeral=True,
         )
     except Exception:
+        logging.exception(
+            f'An exception occured with input "{day}-{month}-{year} {hour}:{minute}:{second} {timezone}" (manual mode)'
+        )
         await ctx.respond(
             "Unknown exception occured, please try again later.",
             ephemeral=True,
@@ -153,7 +144,7 @@ async def automatic(
     ctx,
     user_input: discord.Option(
         str,
-        "Work on most formats, D/M/Y format take precedence, TZ in this input is likely to be ignored",
+        "Work on most formats , D/M/Y format take precedence, relative time (eg. in 2 hours) is somewhat supported",
         name="datetime",
     ),
     timezone: discord.Option(
@@ -167,19 +158,19 @@ async def automatic(
             timezone = users_db[ctx.author.id]["default_timezone"]
         else:
             timezone = "+00:00"
-    tz_match = re.search("([+-])(\d?\d)(?::([0-5]\d))?", timezone)
-    if not tz_match:
+    try:
+        tz_offset_seconds = parsers.parse_timezone(timezone)
+    except ValueError:
         await ctx.respond(
             "Invalid timezone format, please make sure the input is correct and try again.",
             ephemeral=True,
         )
         return
-    tz_sign = 1 if tz_match[1] == "+" else -1
-    tz_hour = int(tz_match[2])
-    tz_minute = int(tz_match[3]) if tz_match[3] else 0
-    tz_offset_seconds = tz_sign * 60 * (tz_hour * 60 + tz_minute)
+    reference_time = datetime.datetime.utcnow() + relativedelta(
+        seconds=tz_offset_seconds
+    )
     try:
-        ctparsed_time = ctparse.ctparse(user_input, ts=datetime.datetime.utcnow())
+        ctparsed_time = ctparse.ctparse(user_input, ts=reference_time)
         if ctparsed_time is None:
             await ctx.respond(
                 "Unable to parse the date and time, please make sure the input is correct and try again.",
@@ -193,19 +184,19 @@ async def automatic(
                     datetime.datetime(
                         ctparsed_resolution.year
                         if ctparsed_resolution.year is not None
-                        else datetime.datetime.utcnow().year,
+                        else reference_time.year,
                         ctparsed_resolution.month
                         if ctparsed_resolution.month is not None
-                        else datetime.datetime.utcnow().month,
+                        else reference_time.month,
                         ctparsed_resolution.day
                         if ctparsed_resolution.day is not None
-                        else datetime.datetime.utcnow().day,
+                        else reference_time.day,
                         ctparsed_resolution.hour
                         if ctparsed_resolution.hour is not None
-                        else datetime.datetime.utcnow().hour,
+                        else reference_time.hour,
                         ctparsed_resolution.minute
                         if ctparsed_resolution.minute is not None
-                        else datetime.datetime.utcnow().minute,
+                        else reference_time.minute,
                     ).timetuple()
                 )
             )
@@ -256,16 +247,16 @@ async def automatic(
             ephemeral=True,
         )
     except Exception:
+        logging.exception(
+            f'An exception occured with input "{user_input} {timezone}" (automatic mode)'
+        )
         await ctx.respond(
             "Unknown exception occured, please try again later.",
             ephemeral=True,
         )
 
 
-config = bot.create_group(
-    "config",
-    "Configure the bot", guild_ids=[772410370810839070]  # Uncomment to get instant propagation of slash commands
-)
+config = bot.create_group("config", "Configure the bot", guild_ids=preview_guilds)
 
 
 @config.command(
@@ -303,7 +294,7 @@ async def set_default_timezone(
 
 bot.run(os.getenv("TOKEN"))
 
-print("Closing databases")
+logging.info("Closing databases")
 users_db.close()
-guilds_db.close()
-print("Databases successfully closed")
+logging.info("Databases closed")
+logging.info("Exiting...")
