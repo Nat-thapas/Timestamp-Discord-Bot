@@ -144,7 +144,7 @@ async def automatic(
     ctx,
     user_input: discord.Option(
         str,
-        "Work on most formats , D/M/Y format take precedence, relative time (eg. in 2 hours) is somewhat supported",
+        "Work on most formats , D/M/Y format take precedence, relative time is somewhat supported",
         name="datetime",
     ),
     timezone: discord.Option(
