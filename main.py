@@ -14,7 +14,9 @@ from sqlitedict import SqliteDict
 
 import parsers
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s:%(levelname)s:%(name)s: %(message)s')
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s:%(levelname)s:%(name)s: %(message)s"
+)
 
 dotenv.load_dotenv()
 
@@ -39,6 +41,9 @@ users_db = SqliteDict(
     autocommit=True,
     outer_stack=False,
 )
+
+with open("timezones_abbreviations.json") as tz_data_json_file:
+    timezone_abbreviations_data = json.load(tz_data_json_file)
 
 bot = discord.Bot()
 
@@ -72,7 +77,7 @@ async def manual(
     ),
     timezone: discord.Option(
         str,
-        "±hh:mm or ±hh, leading zero in the hours part can be omitted",
+        "±hh:mm, ±hh, ±h:mm, ±h or well-known abbreviations with standard/daylight option (CST/CDT, EST/EDT)",
         default="DEFAULT",
     ),
 ):
@@ -82,13 +87,23 @@ async def manual(
         else:
             timezone = "+00:00"
     try:
-        tz_offset_seconds = parsers.parse_timezone(timezone)
+        (
+            tz_name,
+            tz_offset_string,
+            tz_offset_seconds,
+        ) = parsers.parse_timezone_abbreviations(timezone, timezone_abbreviations_data)
     except ValueError:
-        await ctx.respond(
-            "Invalid timezone format, please make sure the input is correct and try again.",
-            ephemeral=True,
-        )
-        return
+        try:
+            tz_name = ""
+            tz_offset_string = timezone
+            tz_offset_seconds = parsers.parse_timezone(timezone)
+        except ValueError:
+            await ctx.respond(
+                "Invalid timezone format or unknown abbreviation, please make sure the input is correct and try again.",
+                ephemeral=True,
+            )
+            return
+
     reference_time = datetime.datetime.utcnow() + relativedelta(
         seconds=tz_offset_seconds
     )
@@ -112,6 +127,7 @@ async def manual(
         await ctx.respond(
             dedent(
                 f"""
+                {f"Timezone: {tz_name} ({tz_offset_string})" if tz_name else ""}
                 `<t:{unix_time}:F>` : <t:{unix_time}:F>
                 `<t:{unix_time}:f>` : <t:{unix_time}:f>
                 `<t:{unix_time}:D>` : <t:{unix_time}:D>
@@ -144,12 +160,12 @@ async def automatic(
     ctx,
     user_input: discord.Option(
         str,
-        "Work on most formats , D/M/Y format take precedence, relative time is somewhat supported",
+        "Work on most formats, D/M/Y format take precedence, relative time is somewhat supported",
         name="datetime",
     ),
     timezone: discord.Option(
         str,
-        "±hh:mm or ±hh, leading zero in the hours part can be omitted",
+        "±hh:mm, ±hh, ±h:mm, ±h or well-known abbreviations with standard/daylight option (CST/CDT, EST/EDT)",
         default="DEFAULT",
     ),
 ):
@@ -159,13 +175,23 @@ async def automatic(
         else:
             timezone = "+00:00"
     try:
-        tz_offset_seconds = parsers.parse_timezone(timezone)
+        (
+            tz_name,
+            tz_offset_string,
+            tz_offset_seconds,
+        ) = parsers.parse_timezone_abbreviations(timezone, timezone_abbreviations_data)
     except ValueError:
-        await ctx.respond(
-            "Invalid timezone format, please make sure the input is correct and try again.",
-            ephemeral=True,
-        )
-        return
+        try:
+            tz_name = ""
+            tz_offset_string = timezone
+            tz_offset_seconds = parsers.parse_timezone(timezone)
+        except ValueError:
+            await ctx.respond(
+                "Invalid timezone format or unknown abbreviation, please make sure the input is correct and try again.",
+                ephemeral=True,
+            )
+            return
+
     reference_time = datetime.datetime.utcnow() + relativedelta(
         seconds=tz_offset_seconds
     )
@@ -236,6 +262,7 @@ async def automatic(
         await ctx.respond(
             dedent(
                 f"""
+                {f"Timezone: {tz_name} ({tz_offset_string})" if tz_name else ""}
                 `<t:{unix_time}:F>` : <t:{unix_time}:F>
                 `<t:{unix_time}:f>` : <t:{unix_time}:f>
                 `<t:{unix_time}:D>` : <t:{unix_time}:D>
@@ -265,20 +292,35 @@ config = bot.create_group("config", "Configure the bot", guild_ids=preview_guild
 async def set_default_timezone(
     ctx,
     new_timezone: discord.Option(
-        str, "±hh:mm or ±hh, leading zero in the hours part can be omitted"
+        str,
+        "±hh:mm, ±hh, ±h:mm, ±h or well-known abbreviations with standard/daylight option (CST/CDT, EST/EDT)",
     ),
 ):
-    tz_match = re.search("([+-])(\d?\d)(?::([0-5]\d))?", new_timezone)
-    if not tz_match:
-        await ctx.respond(
-            "Invalid timezone format, please make sure the input is correct and try again.",
-            ephemeral=True,
+    try:
+        (
+            tz_name,
+            tz_offset_string,
+            tz_offset_seconds,
+        ) = parsers.parse_timezone_abbreviations(
+            new_timezone, timezone_abbreviations_data
         )
-        return
-    tz_sign = tz_match[1]
-    tz_hour = int(tz_match[2])
-    tz_minute = int(tz_match[3]) if tz_match[3] else 0
+    except ValueError:
+        try:
+            tz_name = ""
+            tz_offset_string = new_timezone
+            tz_offset_seconds = parsers.parse_timezone(new_timezone)
+        except ValueError:
+            await ctx.respond(
+                "Invalid timezone format or unknown abbreviation, please make sure the input is correct and try again.",
+                ephemeral=True,
+            )
+            return
+
+    tz_sign = "+" if tz_offset_seconds >= 0 else "-"
+    tz_hour = abs(tz_offset_seconds) // 3600
+    tz_minute = (abs(tz_offset_seconds) % 3600) // 60
     tz_string = f"{tz_sign}{tz_hour:02d}:{tz_minute:02d}"
+
     if ctx.author.id in users_db:
         user_data = users_db[ctx.author.id]
     else:
@@ -286,7 +328,7 @@ async def set_default_timezone(
     user_data["default_timezone"] = tz_string
     users_db[ctx.author.id] = user_data
     await ctx.respond(
-        "Successfully configured default timezone for you.",
+        f"""Successfully configured default timezone to {f"{tz_name + ' ' if tz_name else ''}{'(' if tz_name else ''}{tz_string}{')' if tz_name else ''}"} for you.""",
         ephemeral=True,
     )
     return

@@ -27,3 +27,9 @@ def parse_timezone(tz_text: str) -> int:
     tz_minute = int(tz_match[3]) if tz_match[3] else 0
     tz_offset_seconds = tz_sign * 60 * (tz_hour * 60 + tz_minute)
     return tz_offset_seconds
+
+def parse_timezone_abbreviations(tz_text: str, tz_data: dict[str, list[str]]) -> tuple[str, str, int]:
+    tz_text = tz_text.upper()
+    if tz_text not in tz_data:
+        raise ValueError
+    return (tz_data[tz_text][0], tz_data[tz_text][1], parse_timezone(tz_data[tz_text][1]))
