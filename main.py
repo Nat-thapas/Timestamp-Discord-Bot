@@ -3,7 +3,6 @@ import datetime
 import json
 import logging
 import os
-import re
 from textwrap import dedent
 
 import ctparse
